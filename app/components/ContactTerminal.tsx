@@ -76,6 +76,13 @@ export function ContactTerminal({ host }: { host: string }) {
     setLines((prev) => [...prev, ...l].slice(-MAX_LINES));
   }
 
+  // Vuelve exactamente al estado inicial: limpia el historial y muestra la bienvenida como al cargar la página.
+  function reset() {
+    setData({ name: "", email: "", message: "" });
+    setLines(intro);
+    setStep("name");
+  }
+
   function restart(...note: Line[]) {
     setData({ name: "", email: "", message: "" });
     push(...note);
@@ -104,7 +111,8 @@ export function ContactTerminal({ host }: { host: string }) {
   function runShell(cmd: string) {
     push({ kind: "cmd", text: cmd });
     if (!cmd) return;
-    if (cmd === "./contacto.sh" || cmd === "contacto" || cmd === "reset") return restart(...intro);
+    if (cmd.toLowerCase() === "reset") return reset();
+    if (cmd === "./contacto.sh" || cmd === "contacto") return restart(...intro);
     if (cmd === "clear") return setLines([]);
     if (cmd === "help") {
       return push({ kind: "out", text: "Comandos: ./contacto.sh  reset  clear  help  whoami" });
@@ -122,9 +130,7 @@ export function ContactTerminal({ host }: { host: string }) {
     if (step === "sending") return;
     const answer: Line = { kind: "answer", q: questions[step], text: step === "message" ? `\n${raw}` : ` ${v}` };
 
-    if (v.toLowerCase() === "reset") {
-      return restart(answer, { kind: "muted", text: "# Formulario reiniciado. Empecemos de nuevo." });
-    }
+    if (v.toLowerCase() === "reset") return reset();
 
     if (step === "name") {
       if (!v) return push(answer, { kind: "err", text: "✗ El nombre no puede estar vacío." });

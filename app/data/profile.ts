@@ -8,7 +8,7 @@ export const profile = {
   location: "Cáceres, España",
   // El email no se muestra en la web: el formulario de contacto envía a CONTACT_TO_EMAIL (.env.local).
   linkedin: "", // p. ej. "https://www.linkedin.com/in/tu-usuario"
-  cv: "", // p. ej. "/cv.pdf" (coloca el archivo en /public)
+  cv: "/CV-Daniel-Martin-Rodriguez.pdf", // archivo en /public
   focus: "Backend → Full-Stack",
   tagline:
     "Estudiante de 2º de DAW. Me enfoco en el backend mientras me formo para ser Full-Stack, y disfruto resolviendo problemas de forma eficiente.",

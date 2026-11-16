@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { sendContact } from "../actions/contact";
+import { sendContact, type ContactResult } from "../actions/contact";
 
 type Step = "name" | "email" | "message" | "confirm" | "sending" | "shell";
 type Line = { kind: "cmd" | "out" | "err" | "ok" | "muted" | "answer"; text: ReactNode; q?: string };
@@ -15,6 +15,32 @@ const questions: Record<"name" | "email" | "message" | "confirm", string> = {
   confirm: "? ¿Enviar mensaje? [S/n]",
 };
 
+const MAX_LINES = 200;
+const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+const lineColor: Record<Line["kind"], string> = {
+  cmd: "text-text",
+  out: "text-subtext1",
+  err: "text-red",
+  ok: "text-green",
+  muted: "text-overlay1",
+  answer: "text-text",
+};
+
+// Aislado para que el tick de 90 ms solo re-renderice el spinner, no toda la terminal.
+function Spinner() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => f + 1), 90);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="text-yellow">
+      {SPINNER[frame % SPINNER.length]} Enviando mensaje...
+    </div>
+  );
+}
+
 const intro: Line[] = [
   { kind: "out", text: "Hola 👋 Rellena los campos y pulsa Enter para continuar." },
   { kind: "muted", text: "# En el mensaje usa Shift+Enter para saltos de línea. Escribe 'reset' para empezar de nuevo." },
@@ -25,7 +51,6 @@ export function ContactTerminal({ host }: { host: string }) {
   const [lines, setLines] = useState<Line[]>(intro);
   const [value, setValue] = useState("");
   const [data, setData] = useState({ name: "", email: "", message: "" });
-  const [frame, setFrame] = useState(0);
   const inputRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const honeypotRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -38,12 +63,6 @@ export function ContactTerminal({ host }: { host: string }) {
     if (interacted.current) inputRef.current?.focus({ preventScroll: true });
   }, [lines, step]);
 
-  useEffect(() => {
-    if (step !== "sending") return;
-    const id = setInterval(() => setFrame((f) => f + 1), 90);
-    return () => clearInterval(id);
-  }, [step]);
-
   const prompt = (
     <span className="shrink-0">
       <span className="text-green">visitante@{host}</span>
@@ -54,7 +73,7 @@ export function ContactTerminal({ host }: { host: string }) {
   );
 
   function push(...l: Line[]) {
-    setLines((prev) => [...prev, ...l]);
+    setLines((prev) => [...prev, ...l].slice(-MAX_LINES));
   }
 
   function restart(...note: Line[]) {
@@ -65,7 +84,12 @@ export function ContactTerminal({ host }: { host: string }) {
 
   async function submit() {
     setStep("sending");
-    const res = await sendContact({ ...data, website: honeypotRef.current?.value });
+    let res: ContactResult;
+    try {
+      res = await sendContact({ ...data, website: honeypotRef.current?.value });
+    } catch {
+      res = { ok: false, error: "error de conexión" };
+    }
     if (res.ok) {
       push(
         { kind: "ok", text: "✓ Mensaje enviado. ¡Gracias! Te responderé lo antes posible." },
@@ -135,16 +159,6 @@ export function ContactTerminal({ host }: { host: string }) {
     }
   }
 
-  const spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
-  const lineColor: Record<Line["kind"], string> = {
-    cmd: "text-text",
-    out: "text-subtext1",
-    err: "text-red",
-    ok: "text-green",
-    muted: "text-overlay1",
-    answer: "text-text",
-  };
-
   return (
     <div
       className="overflow-hidden rounded-xl border border-surface0 bg-mantle font-mono text-[13px] shadow-2xl shadow-crust/40"
@@ -184,9 +198,7 @@ export function ContactTerminal({ host }: { host: string }) {
         )}
 
         {step === "sending" ? (
-          <div className="text-yellow">
-            {spinner[frame % spinner.length]} Enviando mensaje...
-          </div>
+          <Spinner />
         ) : (
           <label className="flex items-start">
             {step === "shell" ? prompt : <span className="mr-2 shrink-0 text-mauve">{questions[step]}</span>}

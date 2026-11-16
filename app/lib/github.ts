@@ -38,14 +38,22 @@ export async function getProjects(): Promise<Project[]> {
     const res = await fetch(
       `https://api.github.com/users/${profile.githubUser}/repos?per_page=100&sort=pushed`,
       {
-        headers: { Accept: "application/vnd.github+json" },
+        headers: {
+          Accept: "application/vnd.github+json",
+          // Opcional: con token el límite pasa de 60 a 5000 peticiones/hora.
+          ...(process.env.GITHUB_TOKEN && { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }),
+        },
         // Se refresca cada hora: los repos nuevos aparecen solos.
         next: { revalidate: 3600 },
       },
     );
-    if (res.ok) repos = await res.json();
-  } catch {
-    // Sin red o límite de la API: se muestra la sección vacía con enlace a GitHub.
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    repos = await res.json();
+  } catch (e) {
+    // En el build no hay versión previa: se muestra la sección vacía con enlace a GitHub.
+    // En una revalidación se relanza para que Next siga sirviendo la última página buena.
+    if (process.env.NEXT_PHASE !== "phase-production-build") throw e;
+    console.error("No se pudieron cargar los repos:", e);
   }
 
   return repos

@@ -26,6 +26,8 @@ const nav = [
   ["Contacto", "#contacto"],
 ];
 
+const monthYear = new Intl.DateTimeFormat("es-ES", { month: "short", year: "numeric" });
+
 const githubUrl = `https://github.com/${profile.githubUser}`;
 
 export default async function Home() {
@@ -286,7 +288,7 @@ function Projects({ projects }: { projects: Project[] }) {
 }
 
 function ProjectCard({ project: p, accent }: { project: Project; accent: string }) {
-  const updated = new Date(p.updatedAt).toLocaleDateString("es-ES", { month: "short", year: "numeric" });
+  const updated = monthYear.format(new Date(p.updatedAt));
   return (
     <article className="group relative flex flex-col rounded-xl border border-surface0 bg-mantle p-6 transition hover:-translate-y-1 hover:border-surface2">
       <div className="flex items-start justify-between gap-4">

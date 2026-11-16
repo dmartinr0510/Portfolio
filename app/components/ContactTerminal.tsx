@@ -41,27 +41,81 @@ function Spinner() {
   );
 }
 
+const HELLO = "Hola 👋 Rellena los campos y pulsa Enter para continuar.";
+const HINT = "# En el mensaje usa Shift+Enter para saltos de línea. Escribe 'reset' para empezar de nuevo.";
+
 const intro: Line[] = [
-  { kind: "out", text: "Hola 👋 Rellena los campos y pulsa Enter para continuar." },
-  { kind: "muted", text: "# En el mensaje usa Shift+Enter para saltos de línea. Escribe 'reset' para empezar de nuevo." },
+  { kind: "out", text: HELLO },
+  { kind: "muted", text: HINT },
 ];
+
+// Guion de la animación de bienvenida: el comando se teclea a velocidad humana y la salida se imprime rápido.
+// Array.from separa por puntos de código para no partir el emoji por la mitad.
+const SCRIPT = [
+  { chars: Array.from("./contacto.sh"), ms: 55, pauseBefore: 450 },
+  { chars: Array.from(HELLO), ms: 14, pauseBefore: 380 },
+  { chars: Array.from(HINT), ms: 7, pauseBefore: 160 },
+];
+const OFFSETS = SCRIPT.map((_, i) => SCRIPT.slice(0, i).reduce((n, seg) => n + seg.chars.length, 0));
+const TOTAL = OFFSETS[OFFSETS.length - 1] + SCRIPT[SCRIPT.length - 1].chars.length;
+
+// Retardo antes de escribir el carácter número `typed`.
+function delayFor(typed: number) {
+  const seg = OFFSETS.findLastIndex((o) => typed >= o);
+  return typed === OFFSETS[seg] ? SCRIPT[seg].pauseBefore : SCRIPT[seg].ms;
+}
+
+function BlockCursor() {
+  return <span aria-hidden className="ml-px inline-block h-4 w-2 translate-y-0.5 animate-pulse bg-mauve" />;
+}
 
 export function ContactTerminal({ host }: { host: string }) {
   const [step, setStep] = useState<Step>("name");
-  const [lines, setLines] = useState<Line[]>(intro);
+  const [lines, setLines] = useState<Line[]>([]);
+  // Animación de bienvenida: `typed` caracteres del guion escritos; `showIntro` false tras un `clear`.
+  const [showIntro, setShowIntro] = useState(true);
+  const [typed, setTyped] = useState(0);
+  const [inView, setInView] = useState(false);
+  const typing = showIntro && typed < TOTAL;
   const [value, setValue] = useState("");
   const [data, setData] = useState({ name: "", email: "", message: "" });
   const inputRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const honeypotRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const interacted = useRef(false);
+
+  // La animación empieza cuando la terminal entra en pantalla, no al cargar (está al final de la página).
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!typing || !inView) return;
+    // Con movimiento reducido se muestra todo de golpe.
+    const instant = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const id = setTimeout(() => setTyped((t) => (instant ? TOTAL : t + 1)), instant ? 0 : delayFor(typed));
+    return () => clearTimeout(id);
+  }, [typing, inView, typed]);
 
   // Mantén el final de la terminal a la vista sin mover la página al cargar.
   useEffect(() => {
     const body = bodyRef.current;
     if (body) body.scrollTop = body.scrollHeight;
     if (interacted.current) inputRef.current?.focus({ preventScroll: true });
-  }, [lines, step]);
+  }, [lines, step, typing]);
 
   const prompt = (
     <span className="shrink-0">
@@ -79,7 +133,9 @@ export function ContactTerminal({ host }: { host: string }) {
   // Vuelve exactamente al estado inicial: limpia el historial y muestra la bienvenida como al cargar la página.
   function reset() {
     setData({ name: "", email: "", message: "" });
-    setLines(intro);
+    setLines([]);
+    setShowIntro(true);
+    setTyped(0);
     setStep("name");
   }
 
@@ -113,7 +169,10 @@ export function ContactTerminal({ host }: { host: string }) {
     if (!cmd) return;
     if (cmd.toLowerCase() === "reset") return reset();
     if (cmd === "./contacto.sh" || cmd === "contacto") return restart(...intro);
-    if (cmd === "clear") return setLines([]);
+    if (cmd === "clear") {
+      setShowIntro(false);
+      return setLines([]);
+    }
     if (cmd === "help") {
       return push({ kind: "out", text: "Comandos: ./contacto.sh  reset  clear  help  whoami" });
     }
@@ -167,9 +226,11 @@ export function ContactTerminal({ host }: { host: string }) {
 
   return (
     <div
+      ref={rootRef}
       className="overflow-hidden rounded-xl border border-surface0 bg-mantle font-mono text-[13px] shadow-2xl shadow-crust/40"
       onClick={() => {
         interacted.current = true;
+        if (typing) setTyped(TOTAL); // clic durante la animación: saltar al final
         inputRef.current?.focus({ preventScroll: true });
       }}
     >
@@ -181,10 +242,7 @@ export function ContactTerminal({ host }: { host: string }) {
       </div>
 
       <div ref={bodyRef} className="max-h-[26rem] min-h-64 cursor-text overflow-y-auto p-5 leading-7">
-        <div className="flex">
-          {prompt}
-          <span>./contacto.sh</span>
-        </div>
+        {showIntro && <AnimatedIntro typed={typed} prompt={prompt} />}
         {lines.map((l, i) =>
           l.kind === "cmd" ? (
             <div key={i} className="flex">
@@ -203,7 +261,7 @@ export function ContactTerminal({ host }: { host: string }) {
           ),
         )}
 
-        {step === "sending" ? (
+        {typing ? null : step === "sending" ? (
           <Spinner />
         ) : (
           <label className="flex items-start">
@@ -253,9 +311,49 @@ export function ContactTerminal({ host }: { host: string }) {
       <div className="flex items-center justify-between border-t border-surface0 bg-crust px-4 py-2 text-[11px] text-overlay1">
         <span>{step === "shell" ? "bash" : `paso ${Math.min(4, ["name", "email", "message", "confirm", "sending"].indexOf(step) + 1)}/4`}</span>
         <span>
-          <kbd className="text-subtext0">Enter</kbd> {step === "message" ? "continuar · Shift+Enter nueva línea" : "continuar"}
+          {typing ? (
+            "clic para saltar"
+          ) : (
+            <>
+              <kbd className="text-subtext0">Enter</kbd> {step === "message" ? "continuar · Shift+Enter nueva línea" : "continuar"}
+            </>
+          )}
         </span>
       </div>
     </div>
+  );
+}
+
+// Cabecera de la terminal (comando + bienvenida) mostrando solo los `typed` primeros caracteres del guion.
+function AnimatedIntro({ typed, prompt }: { typed: number; prompt: ReactNode }) {
+  const done = typed >= TOTAL;
+  // Segmentos visibles: el comando siempre (aunque vacío), el resto en cuanto empiezan a escribirse.
+  const visible = SCRIPT.map((_, i) => i === 0 || typed > OFFSETS[i]);
+  const active = visible.lastIndexOf(true);
+  const text = (i: number) => SCRIPT[i].chars.slice(0, Math.max(0, typed - OFFSETS[i])).join("");
+  const cursor = (i: number) => !done && i === active && <BlockCursor />;
+
+  return (
+    <>
+      <div className="flex">
+        {prompt}
+        <span>
+          {text(0)}
+          {cursor(0)}
+        </span>
+      </div>
+      {visible[1] && (
+        <div className={`whitespace-pre-wrap break-words ${lineColor.out}`}>
+          {text(1)}
+          {cursor(1)}
+        </div>
+      )}
+      {visible[2] && (
+        <div className={`whitespace-pre-wrap break-words ${lineColor.muted}`}>
+          {text(2)}
+          {cursor(2)}
+        </div>
+      )}
+    </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { sendContact, type ContactResult } from "../actions/contact";
+import { TerminalRunner } from "./TerminalRunner";
 
 type Step = "name" | "email" | "message" | "confirm" | "sending" | "shell";
 type Line = { kind: "cmd" | "out" | "err" | "ok" | "muted" | "answer"; text: ReactNode; q?: string };
@@ -16,6 +17,10 @@ const questions: Record<"name" | "email" | "message" | "confirm", string> = {
 };
 
 const MAX_LINES = 200;
+
+// Easter egg: no aparece en `help`, pero `ls -a` enseña el script oculto.
+const GAME_COMMANDS = new Set(["jugar", "play", "./.minijuego.sh", ".minijuego.sh", "sh .minijuego.sh", "bash .minijuego.sh"]);
+const GAME_HINT: Line = { kind: "muted", text: "# Sin conexión a internet. Mientras vuelve, escribe 'jugar' 🎮" };
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
 const lineColor: Record<Line["kind"], string> = {
@@ -52,17 +57,24 @@ const intro: Line[] = [
 // Guion de la animación de bienvenida: el comando se teclea a velocidad humana y la salida se imprime rápido.
 // Array.from separa por puntos de código para no partir el emoji por la mitad.
 const SCRIPT = [
-  { chars: Array.from("./contacto.sh"), ms: 55, pauseBefore: 450 },
-  { chars: Array.from(HELLO), ms: 14, pauseBefore: 380 },
-  { chars: Array.from(HINT), ms: 7, pauseBefore: 160 },
+// `perTick`: letras por paso. Los navegadores no bajan de ~4 ms por temporizador, así que la salida avanza de 2 en 2.
+  { chars: Array.from("./contacto.sh"), ms: 30, perTick: 1, pauseBefore: 250 },
+  { chars: Array.from(HELLO), ms: 8, perTick: 2, pauseBefore: 200 },
+  { chars: Array.from(HINT), ms: 8, perTick: 2, pauseBefore: 100 },
 ];
 const OFFSETS = SCRIPT.map((_, i) => SCRIPT.slice(0, i).reduce((n, seg) => n + seg.chars.length, 0));
 const TOTAL = OFFSETS[OFFSETS.length - 1] + SCRIPT[SCRIPT.length - 1].chars.length;
 
-// Retardo antes de escribir el carácter número `typed`.
+// Retardo antes de escribir el carácter número `typed`, y hasta qué carácter se avanza en ese paso
+// (sin pasarse del final del segmento, para no saltarse la pausa del siguiente).
 function delayFor(typed: number) {
   const seg = OFFSETS.findLastIndex((o) => typed >= o);
   return typed === OFFSETS[seg] ? SCRIPT[seg].pauseBefore : SCRIPT[seg].ms;
+}
+
+function nextTyped(typed: number) {
+  const seg = OFFSETS.findLastIndex((o) => typed >= o);
+  return Math.min(typed + SCRIPT[seg].perTick, OFFSETS[seg] + SCRIPT[seg].chars.length);
 }
 
 function BlockCursor() {
@@ -77,6 +89,7 @@ export function ContactTerminal({ host }: { host: string }) {
   const [typed, setTyped] = useState(0);
   const [inView, setInView] = useState(false);
   const typing = showIntro && typed < TOTAL;
+  const [playing, setPlaying] = useState(false);
   const [value, setValue] = useState("");
   const [data, setData] = useState({ name: "", email: "", message: "" });
   const inputRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
@@ -106,7 +119,7 @@ export function ContactTerminal({ host }: { host: string }) {
     if (!typing || !inView) return;
     // Con movimiento reducido se muestra todo de golpe.
     const instant = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const id = setTimeout(() => setTyped((t) => (instant ? TOTAL : t + 1)), instant ? 0 : delayFor(typed));
+    const id = setTimeout(() => setTyped((t) => (instant ? TOTAL : nextTyped(t))), instant ? 0 : delayFor(typed));
     return () => clearTimeout(id);
   }, [typing, inView, typed]);
 
@@ -115,7 +128,19 @@ export function ContactTerminal({ host }: { host: string }) {
     const body = bodyRef.current;
     if (body) body.scrollTop = body.scrollHeight;
     if (interacted.current) inputRef.current?.focus({ preventScroll: true });
-  }, [lines, step, typing]);
+  }, [lines, step, typing, playing]);
+
+  // Igual que el navegador cuando se va internet: si se cae la conexión, la terminal propone el minijuego.
+  useEffect(() => {
+    const offline = () => setLines((prev) => [...prev, GAME_HINT].slice(-MAX_LINES));
+    const online = () => setLines((prev) => [...prev, { kind: "ok" as const, text: "✓ Conexión recuperada." }].slice(-MAX_LINES));
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, []);
 
   const prompt = (
     <span className="shrink-0">
@@ -160,13 +185,24 @@ export function ContactTerminal({ host }: { host: string }) {
       );
     } else {
       push({ kind: "err", text: `✗ Error: ${res.error}.` }, { kind: "muted", text: "# Escribe ./contacto.sh para reintentar." });
+      if (!navigator.onLine) push(GAME_HINT);
     }
     setStep("shell");
+  }
+
+  function exitGame(score: number, best: number) {
+    setPlaying(false);
+    push({ kind: "muted", text: score > 0 ? `# Partida terminada · puntuación ${score} · récord ${best}` : "# Minijuego cerrado." });
   }
 
   function runShell(cmd: string) {
     push({ kind: "cmd", text: cmd });
     if (!cmd) return;
+    if (GAME_COMMANDS.has(cmd.toLowerCase())) return setPlaying(true);
+    if (cmd === "ls") return push({ kind: "out", text: "contacto.sh" });
+    if (/^ls -(a|la|al)$/.test(cmd)) {
+      return push({ kind: "out", text: ".  ..  .minijuego.sh  contacto.sh" });
+    }
     if (cmd.toLowerCase() === "reset") return reset();
     if (cmd === "./contacto.sh" || cmd === "contacto") return restart(...intro);
     if (cmd === "clear") {
@@ -174,7 +210,7 @@ export function ContactTerminal({ host }: { host: string }) {
       return setLines([]);
     }
     if (cmd === "help") {
-      return push({ kind: "out", text: "Comandos: ./contacto.sh  reset  clear  help  whoami" });
+      return push({ kind: "out", text: "Comandos: ./contacto.sh  reset  clear  help  whoami  ls" });
     }
     if (cmd === "whoami") return push({ kind: "out", text: "visitante — gracias por pasarte 😊" });
     push({ kind: "err", text: `bash: ${cmd.split(" ")[0]}: orden no encontrada` });
@@ -190,6 +226,11 @@ export function ContactTerminal({ host }: { host: string }) {
     const answer: Line = { kind: "answer", q: questions[step], text: step === "message" ? `\n${raw}` : ` ${v}` };
 
     if (v.toLowerCase() === "reset") return reset();
+    // El minijuego también se puede abrir en mitad del formulario (salvo en el mensaje, que es texto libre).
+    if (step !== "message" && GAME_COMMANDS.has(v.toLowerCase())) {
+      push(answer);
+      return setPlaying(true);
+    }
 
     if (step === "name") {
       if (!v) return push(answer, { kind: "err", text: "✗ El nombre no puede estar vacío." });
@@ -261,7 +302,9 @@ export function ContactTerminal({ host }: { host: string }) {
           ),
         )}
 
-        {typing ? null : step === "sending" ? (
+        {typing ? null : playing ? (
+          <TerminalRunner onExit={exitGame} />
+        ) : step === "sending" ? (
           <Spinner />
         ) : (
           <label className="flex items-start">
@@ -313,6 +356,10 @@ export function ContactTerminal({ host }: { host: string }) {
         <span>
           {typing ? (
             "clic para saltar"
+          ) : playing ? (
+            <>
+              <kbd className="text-subtext0">Espacio</kbd> saltar · <kbd className="text-subtext0">Esc</kbd> salir
+            </>
           ) : (
             <>
               <kbd className="text-subtext0">Enter</kbd> {step === "message" ? "continuar · Shift+Enter nueva línea" : "continuar"}

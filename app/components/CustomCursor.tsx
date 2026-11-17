@@ -10,6 +10,7 @@ type Mode = "default" | "link" | "text";
 
 function modeFor(target: EventTarget | null): Mode {
   if (!(target instanceof Element)) return "default";
+  if (target.closest("canvas")) return "default"; // p. ej. el minijuego de la terminal
   if (target.closest(TEXT)) return "text";
   if (target.closest(INTERACTIVE)) return "link";
   return "default";

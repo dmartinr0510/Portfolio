@@ -147,7 +147,7 @@ function Hero() {
           </a>
           {profile.cv && (
             <a
-              href={profile.cv}
+              href={`${process.env.NEXT_PUBLIC_BASE_PATH}${profile.cv}`}
               target="_blank"
               rel="noopener"
               className="inline-flex items-center gap-2 rounded-lg border border-surface1 bg-mantle/60 px-5 py-2.5 text-sm font-semibold transition hover:border-peach hover:text-peach"

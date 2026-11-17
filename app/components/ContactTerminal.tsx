@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { sendContact, type ContactResult } from "../actions/contact";
+import { sendContact, type ContactResult } from "@/app/actions/contact";
 import { TerminalRunner } from "./TerminalRunner";
 
 type Step = "name" | "email" | "message" | "confirm" | "sending" | "shell";
